@@ -33,7 +33,7 @@ know to check manually instead of trusting silence.
 3. **Run it**, pick one or both:
    - **Local loop** (fastest, every 2 min while your machine is on):
      `INTERVAL=120 python tracker.py`
-   - **GitHub Actions** (runs 24/7, every ~5 min): push this folder to a **public** repo (see caveats below),
+   - **GitHub Actions** (runs 24/7, every ~20 min): push this folder to a **public** repo (see caveats below),
      add a repo secret `NTFY_TOPIC` (and optionally `DISCORD_WEBHOOK`), then trigger the
      workflow once from the Actions tab to set the baseline. `state.json` is committed back
      only when something changes.

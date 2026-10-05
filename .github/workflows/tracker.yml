@@ -2,7 +2,7 @@ name: meebo tracker
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # GitHub's minimum; runs can lag a few minutes under load
+    - cron: "*/20 * * * *"  # every 20 min; runs can lag under load
   workflow_dispatch:         # lets you trigger a check manually from the Actions tab
     inputs:
       test_notify:
