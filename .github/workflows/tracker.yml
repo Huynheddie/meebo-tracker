@@ -1,0 +1,39 @@
+name: meebo tracker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # GitHub's minimum; runs can lag a few minutes under load
+  workflow_dispatch:         # lets you trigger a check manually from the Actions tab
+
+permissions:
+  contents: write            # needed to commit state.json between runs
+
+concurrency:
+  group: tracker
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tracker
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          X_RSS_FEEDS: ${{ secrets.X_RSS_FEEDS }}
+        run: python tracker.py --once
+
+      - name: Save state
+        run: |
+          git config user.name "tracker-bot"
+          git config user.email "tracker-bot@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || git commit -m "tracker state $(date -u +%FT%TZ)"
+          git push || true
