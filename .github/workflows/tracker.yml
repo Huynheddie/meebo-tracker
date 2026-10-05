@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"   # GitHub's minimum; runs can lag a few minutes under load
   workflow_dispatch:         # lets you trigger a check manually from the Actions tab
+    inputs:
+      test_notify:
+        description: "Send a test push to your phone before checking"
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # needed to commit state.json between runs
@@ -28,7 +33,9 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           X_RSS_FEEDS: ${{ secrets.X_RSS_FEEDS }}
-        run: python tracker.py --once
+        run: |
+          if [ "${{ inputs.test_notify }}" = "true" ]; then python tracker.py --test-notify; fi
+          python tracker.py --once
 
       - name: Save state
         run: |
