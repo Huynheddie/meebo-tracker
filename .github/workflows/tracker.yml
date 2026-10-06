@@ -44,7 +44,11 @@ jobs:
         run: |
           if [ "${{ inputs.test_notify }}" = "true" ]; then python tracker.py --test-notify; fi
           if [ "${{ inputs.test_alarm }}" = "true" ]; then python tracker.py --test-alarm; fi
-          python tracker.py --once
+          python tracker.py --once 2>&1 | tee tracker.log
+          status=${PIPESTATUS[0]}
+          # show what this run checked on the run's own page, readable in the GitHub app
+          { echo '```'; cat tracker.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       - name: Save state
         run: |
