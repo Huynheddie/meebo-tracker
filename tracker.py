@@ -340,7 +340,7 @@ def run_once(state):
             notify("CHASE: Worlds event page changed",
                    "Chase updated the Worlds Cashback Moments page — the drop may be live. "
                    f"New text: {' | '.join(added)[:300] or c['text'][:300]}",
-                   url=CHASE_URL)
+                   url=PRICELESS_URL)  # where tickets will most likely be bought
         state["chase_hash"] = c["hash"]
         state["chase_text"] = c["text"]
         print(f"[{now()}] chase: hash {c['hash']}" + (" (baseline)" if not prev_hash else ""))
