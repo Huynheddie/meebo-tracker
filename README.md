@@ -40,6 +40,12 @@ know to check manually instead of trusting silence.
 
 Optional: set `DISCORD_WEBHOOK` to also get a Discord message.
 
+Optional: set `PUSHOVER_USER` and `PUSHOVER_TOKEN` to make drop alerts (a new Priceless listing, or
+a Chase page change) ring as a Pushover **emergency alarm**: it repeats every 30 seconds for up to
+an hour until you tap Acknowledge, and sounds through silent mode if Critical Alerts are allowed
+for Pushover in iOS Settings. News and warning alerts stay ntfy-only. Test it from the Actions tab
+with the "Ring a test Pushover alarm" option, which stops on its own after 2 minutes.
+
 ## Social / news monitoring (free)
 
 X has no free real-time access: the API is paid, Nitter is gone, and free RSS generators

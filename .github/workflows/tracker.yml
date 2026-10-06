@@ -9,6 +9,10 @@ on:
         description: "Send a test push to your phone before checking"
         type: boolean
         default: false
+      test_alarm:
+        description: "Ring a test Pushover alarm before checking"
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # needed to commit state.json between runs
@@ -35,8 +39,11 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           X_RSS_FEEDS: ${{ secrets.X_RSS_FEEDS }}
+          PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
         run: |
           if [ "${{ inputs.test_notify }}" = "true" ]; then python tracker.py --test-notify; fi
+          if [ "${{ inputs.test_alarm }}" = "true" ]; then python tracker.py --test-alarm; fi
           python tracker.py --once
 
       - name: Save state

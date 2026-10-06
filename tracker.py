@@ -17,12 +17,16 @@ Usage:
   python tracker.py                 # loop forever, check every INTERVAL seconds
   python tracker.py --once          # single check (for cron / GitHub Actions)
   python tracker.py --test-notify   # send a test push and exit
+  python tracker.py --test-alarm    # send a test Pushover emergency alarm and exit
   python tracker.py --status        # print what the pages look like right now
 
 Env vars:
   NTFY_TOPIC       ntfy.sh topic name (make it long and random — topics are public)
   NTFY_SERVER      optional, defaults to https://ntfy.sh
   DISCORD_WEBHOOK  optional Discord webhook URL
+  PUSHOVER_USER    optional Pushover user key   } drop alerts also ring as a Pushover
+  PUSHOVER_TOKEN   optional Pushover app token  } emergency alarm until acknowledged
+  PUSHOVER_SOUND   optional, defaults to "persistent" (a long sound)
   KEYWORDS         regex an article/post must match to alert (default: priceless/mastercard/...)
   X_RSS_FEEDS      optional comma list of RSS/Atom feed URLs (e.g. an rss.app feed of @LoLEsports)
   INTERVAL         seconds between checks in loop mode (default 120)
@@ -36,6 +40,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -122,8 +127,34 @@ def check_chase():
 
 
 # ---------------------------------------------------------------- notifications
-def notify(title, message, url=None, priority="urgent"):
-    sent = False
+ALARM_RETRY = 30      # seconds between repeats of a Pushover emergency alarm (Pushover minimum)
+ALARM_EXPIRE = 3600   # stop repeating after an hour if never acknowledged
+
+
+def alarm(title, message, url=None, expire=ALARM_EXPIRE):
+    """Pushover emergency priority: repeats every ALARM_RETRY seconds until acknowledged
+    in the app, and sounds through silent mode if Critical Alerts are allowed on the phone."""
+    user, token = os.environ.get("PUSHOVER_USER"), os.environ.get("PUSHOVER_TOKEN")
+    if not (user and token):
+        return False
+    fields = {"token": token, "user": user, "title": title[:250], "message": message[:1024],
+              "priority": 2, "retry": ALARM_RETRY, "expire": expire,
+              "sound": os.environ.get("PUSHOVER_SOUND", "persistent")}
+    if url:
+        fields.update(url=url[:512], url_title="Open page")
+    try:
+        req = urllib.request.Request("https://api.pushover.net/1/messages.json",
+                                     data=urllib.parse.urlencode(fields).encode(), method="POST")
+        urllib.request.urlopen(req, timeout=20).read()
+        return True
+    except Exception as e:
+        print(f"[{now()}] pushover failed: {e}", file=sys.stderr)
+        return False
+
+
+def notify(title, message, url=None, priority="urgent", ring=False):
+    """ring=True also sends a Pushover emergency alarm. Reserve it for "go buy now" alerts."""
+    sent = alarm(title, message, url) if ring else False
     topic = os.environ.get("NTFY_TOPIC")
     if topic:
         server = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
@@ -308,14 +339,14 @@ def run_once(state):
                 # first run: baseline (but still alert if something is already listed)
                 if products:
                     notify(f"PRICELESS: {len(products)} listing(s) already on {name}",
-                           "\n".join(products.values())[:500], url=url, priority="high")
+                           "\n".join(products.values())[:500], url=url, priority="high", ring=True)
             else:
                 new = {k: v for k, v in products.items() if k not in seen}
                 if new:
                     first = next(iter(new.values()))
                     notify(f"PRICELESS DROP: new {name} experience",
                            f"{len(new)} new listing(s) - go now:\n" + "\n".join(new.values())[:500],
-                           url=first)
+                           url=first, ring=True)
             state["priceless"][name] = sorted(products)
             print(f"[{now()}] priceless/{name}: {len(products)} product(s)")
         except Exception as e:
@@ -340,7 +371,7 @@ def run_once(state):
             notify("CHASE: Worlds event page changed",
                    "Chase updated the Worlds Cashback Moments page — the drop may be live. "
                    f"New text: {' | '.join(added)[:300] or c['text'][:300]}",
-                   url=PRICELESS_URL)  # where tickets will most likely be bought
+                   url=PRICELESS_URL, ring=True)  # where tickets will most likely be bought
         state["chase_hash"] = c["hash"]
         state["chase_text"] = c["text"]
         print(f"[{now()}] chase: hash {c['hash']}" + (" (baseline)" if not prev_hash else ""))
@@ -359,12 +390,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--test-notify", action="store_true")
+    ap.add_argument("--test-alarm", action="store_true")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
 
     if args.test_notify:
         notify("meebo tracker test", "If you see this, notifications work.", url=PRICELESS_URL,
                priority="default")
+        return
+
+    if args.test_alarm:
+        # expires after 2 minutes so a test never rings for an hour
+        if not alarm("meebo tracker alarm test", "Tap Acknowledge to stop the alarm.",
+                     url=PRICELESS_URL, expire=120):
+            sys.exit("Pushover alarm not sent: set PUSHOVER_USER and PUSHOVER_TOKEN")
         return
 
     if args.status:
