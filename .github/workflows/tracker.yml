@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main                # latest state.json, not the commit the run was queued on
 
       - uses: actions/setup-python@v5
         with:
