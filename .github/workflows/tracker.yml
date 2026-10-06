@@ -61,6 +61,7 @@ jobs:
         env:
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
         run: |
-          [ -n "$HEALTHCHECK_URL" ] || exit 0
+          url=$(printf '%s' "$HEALTHCHECK_URL" | tr -d '[:space:]"<>')  # pasted secrets pick up stray spaces/quotes
+          [ -n "$url" ] || exit 0
           if [ "${{ job.status }}" = "success" ]; then path=""; else path="/fail"; fi
-          curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_URL$path" || true
+          curl -fsS -m 10 --retry 3 -o /dev/null "${url%/}$path" || echo "::warning::healthchecks.io ping failed; check the HEALTHCHECK_URL secret"
