@@ -27,6 +27,11 @@ Env vars:
   PUSHOVER_USER    optional Pushover user key   } drop alerts also ring as a Pushover
   PUSHOVER_TOKEN   optional Pushover app token  } emergency alarm until acknowledged
   PUSHOVER_SOUND   optional, defaults to "persistent" (a long sound)
+  QUIET_TZ         time zone for quiet hours (default America/Los_Angeles)
+  QUIET_HOURS      quiet hours as START-END in 24h local time (default 0-6)
+
+Only a ticket listing rings: a Pushover emergency alarm plus an urgent ntfy push. Everything else
+(news, the Chase page, tracker warnings) is a normal push by day and a silent one in quiet hours.
   KEYWORDS         regex an article/post must match to alert (default: priceless/mastercard/...)
   X_RSS_FEEDS      optional comma list of RSS/Atom feed URLs (e.g. an rss.app feed of @LoLEsports)
   INTERVAL         seconds between checks in loop mode (default 120)
@@ -43,6 +48,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 PRICELESS_PAGES = {
@@ -122,10 +128,11 @@ SITEMAP_URL = "https://www.priceless.com/sitemap.xml"
 CELEBRITY_RE = re.compile(
     r"https://www\.priceless\.com/celebrity/(\d+)/([a-z0-9-]*(?:riot-games|league-of-legends|lolesports|arcane)[a-z0-9-]*)$")
 PRODUCT_LOC_RE = re.compile(r"https://www\.priceless\.com/[a-z-]+/product/(\d+)/([a-z0-9-]+)")
-# Whole hyphen-separated words only: "riot" must not match "patriot", "lol" not "lola".
+# Only words that mean League and nothing else: bare "riot" is also Riot Fest (a music festival),
+# "lol" a comedy night, "lta" the Lawn Tennis Association. These ring an alarm, so no guessing.
 PRODUCT_SLUG_RE = re.compile(
-    r"(?:^|-)(?:riot|lcs|lta|lol|arcane|summoners?)(?:-|$)|worlds-20\d\d|league-of-legends|lolesports")
-PRODUCT_TEXT_RE = re.compile(r"league of legends|riot games|lol ?esports|\bLCS\b|\bLTA\b", re.I)
+    r"(?:^|-)(?:lcs|summoners?)(?:-|$)|riot-games|worlds-20\d\d|league-of-legends|lolesports|lol-esports")
+PRODUCT_TEXT_RE = re.compile(r"league of legends|riot games|lol ?esports", re.I)
 MAX_PRODUCT_FETCHES = 20  # per cycle; any left over are checked next cycle
 
 
@@ -161,7 +168,7 @@ def run_sitemap(state):
         state["fails"]["sitemap"] += 1
         print(f"[{now()}] sitemap failed ({state['fails']['sitemap']}): {e}", file=sys.stderr)
         if state["fails"]["sitemap"] == FAIL_ALERT_AFTER:
-            notify("Tracker warning: Priceless sitemap failing", str(e), url=SITEMAP_URL, priority="high")
+            notify("Tracker warning: Priceless sitemap failing", str(e), url=SITEMAP_URL)
         return
     state["fails"]["sitemap"] = 0
 
@@ -173,6 +180,17 @@ def run_sitemap(state):
         m = PRODUCT_LOC_RE.match(u)
         if m:
             products.setdefault(m.group(1), (u, m.group(2)))
+    # A truncated sitemap would make every product it left out look new the next time it came back
+    # complete, burying a real drop under days of backlog. Treat a sudden shrink as a failure.
+    if sm.get("seen") and len(products) < 0.8 * len(sm["seen"]):
+        state["fails"]["sitemap"] += 1
+        print(f"[{now()}] sitemap shrank to {len(products)} products from {len(sm['seen'])}; ignoring it",
+              file=sys.stderr)
+        if state["fails"]["sitemap"] == FAIL_ALERT_AFTER:
+            notify("Tracker warning: Priceless sitemap looks incomplete",
+                   f"{len(products)} listings, was {len(sm['seen'])}", url=SITEMAP_URL)
+        return
+
     if "seen" not in sm:  # first run: baseline everything already live
         sm["seen"] = sorted(products)
         print(f"[{now()}] sitemap: baseline of {len(products)} product(s), "
@@ -244,8 +262,19 @@ def alarm(title, message, url=None, expire=ALARM_EXPIRE):
         return False
 
 
-def notify(title, message, url=None, priority="urgent", ring=False):
-    """ring=True also sends a Pushover emergency alarm. Reserve it for "go buy now" alerts."""
+def in_quiet_hours(at=None):
+    start, end = (int(x) for x in os.environ.get("QUIET_HOURS", "0-6").split("-"))
+    hour = (at or datetime.now(ZoneInfo(os.environ.get("QUIET_TZ", "America/Los_Angeles")))).hour
+    return start <= hour < end if start <= end else (hour >= start or hour < end)
+
+
+def notify(title, message, url=None, ring=False):
+    """ring=True is for tickets on sale and nothing else: a Pushover emergency alarm plus an urgent
+    ntfy push, at any hour. Anything else is a normal push, silent during quiet hours."""
+    if ring:
+        priority = "urgent"
+    else:
+        priority = "min" if in_quiet_hours() else "default"
     sent = alarm(title, message, url) if ring else False
     topic = os.environ.get("NTFY_TOPIC")
     if topic:
@@ -394,7 +423,7 @@ def run_social(state):
             state["fails"][key] += 1
             print(f"[{now()}] {src['name']} failed ({state['fails'][key]}): {e}", file=sys.stderr)
             if state["fails"][key] == FAIL_ALERT_AFTER:
-                notify(f"Tracker warning: {src['name']} failing", str(e), url=src["url"], priority="high")
+                notify(f"Tracker warning: {src['name']} failing", str(e), url=src["url"])
 
     feeds = [f.strip() for f in os.environ.get("X_RSS_FEEDS", "").split(",") if f.strip()]
     for feed in feeds:
@@ -410,7 +439,7 @@ def run_social(state):
             state["fails"][key] += 1
             print(f"[{now()}] rss failed ({state['fails'][key]}): {e}", file=sys.stderr)
             if state["fails"][key] == FAIL_ALERT_AFTER:
-                notify("Tracker warning: RSS feed failing", f"{feed}: {e}", priority="high")
+                notify("Tracker warning: RSS feed failing", f"{feed}: {e}")
 
 
 # ---------------------------------------------------------------- main loop
@@ -423,6 +452,7 @@ def run_once(state):
 
     # --- Priceless (each page tracked separately)
     state.setdefault("priceless", {})
+    newly_failing = []
     for name, url in watched_pages(state).items():
         key = f"priceless:{name}"
         state["fails"].setdefault(key, 0)
@@ -434,7 +464,7 @@ def run_once(state):
                 # first run: baseline (but still alert if something is already listed)
                 if products:
                     notify(f"PRICELESS: {len(products)} listing(s) already on {name}",
-                           "\n".join(products.values())[:500], url=url, priority="high", ring=True)
+                           "\n".join(products.values())[:500], url=url, ring=True)
             else:
                 new = {k: v for k, v in products.items() if k not in seen}
                 if new:
@@ -448,9 +478,12 @@ def run_once(state):
             state["fails"][key] += 1
             print(f"[{now()}] priceless/{name} check failed ({state['fails'][key]}): {e}", file=sys.stderr)
             if state["fails"][key] == FAIL_ALERT_AFTER:
-                notify(f"Tracker warning: {name} check failing",
-                       f"{FAIL_ALERT_AFTER} failures in a row: {e}. Check the page manually.",
-                       url=url, priority="high")
+                newly_failing.append((name, url, e))
+    if newly_failing:
+        name, url, e = newly_failing[0]
+        notify(f"Tracker warning: {len(newly_failing)} Priceless page(s) failing",
+               f"{FAIL_ALERT_AFTER} failures in a row on: {', '.join(n for n, _, _ in newly_failing)[:300]}. "
+               f"First error: {e}. Check Priceless manually.", url=url)
 
     # --- X / social
     run_social(state)
@@ -466,7 +499,7 @@ def run_once(state):
             notify("CHASE: Worlds event page changed",
                    "Chase updated the Worlds Cashback Moments page — the drop may be live. "
                    f"New text: {' | '.join(added)[:300] or c['text'][:300]}",
-                   url=PRICELESS_URL, ring=True)  # where tickets will most likely be bought
+                   url=PRICELESS_URL)  # where tickets will most likely be bought
         state["chase_hash"] = c["hash"]
         state["chase_text"] = c["text"]
         print(f"[{now()}] chase: hash {c['hash']}" + (" (baseline)" if not prev_hash else ""))
@@ -476,7 +509,7 @@ def run_once(state):
         if state["fails"]["chase"] == FAIL_ALERT_AFTER:
             notify("Tracker warning: Chase check failing",
                    f"{FAIL_ALERT_AFTER} failures in a row: {e}. Check the page manually.",
-                   url=CHASE_URL, priority="high")
+                   url=CHASE_URL)
 
     return state
 
@@ -490,8 +523,7 @@ def main():
     args = ap.parse_args()
 
     if args.test_notify:
-        notify("meebo tracker test", "If you see this, notifications work.", url=PRICELESS_URL,
-               priority="default")
+        notify("meebo tracker test", "If you see this, notifications work.", url=PRICELESS_URL)
         return
 
     if args.test_alarm:

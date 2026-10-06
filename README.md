@@ -46,10 +46,11 @@ Optional: set `HEALTHCHECK_URL` to a healthchecks.io ping URL. Every run pings i
 `/fail` if the run errored), so healthchecks.io can alert you when runs stop arriving: an expired
 cron-job.org token or a GitHub outage otherwise looks exactly like "no drop yet".
 
-Optional: set `PUSHOVER_USER` and `PUSHOVER_TOKEN` to make drop alerts (a new Priceless listing, or
-a Chase page change) ring as a Pushover **emergency alarm**: it repeats every 30 seconds for up to
+Optional: set `PUSHOVER_USER` and `PUSHOVER_TOKEN` to make drop alerts (a new League/Riot Priceless
+listing, and nothing else) ring as a Pushover **emergency alarm**: it repeats every 30 seconds for up to
 an hour until you tap Acknowledge, and sounds through silent mode if Critical Alerts are allowed
-for Pushover in iOS Settings. News and warning alerts stay ntfy-only. Test it from the Actions tab
+for Pushover in iOS Settings. Everything else (news, Chase page edits, tracker warnings) is a normal ntfy push, and a
+silent one between midnight and 6am Pacific (`QUIET_HOURS`, `QUIET_TZ`). Test it from the Actions tab
 with the "Ring a test Pushover alarm" option, which stops on its own after 2 minutes.
 
 ## Social / news monitoring (free)
