@@ -11,6 +11,8 @@ experience goes live.
 | Priceless – League of Legends E‑Sports (`/celebrity/19286/...`) | any new listing (the 2026 LCS Champs experience, product 237665, was filed here rather than under Riot Games) |
 | Priceless – `/lolesports-shop` (where `priceless.com/LoLesports` redirects) | any new listing |
 | Chase Cashback Moments – Worlds event page | any change to the event description block |
+| Every other League/Riot page on Priceless (14 more as of Oct 2026, found from the sitemap, including ones added later) | any new listing |
+| Priceless sitemap (every live listing on the site, rebuilt daily) | any new listing whose URL or page mentions League of Legends / Riot / LCS, or that links to a League/Riot page, wherever it is filed |
 
 | lolesports.com/news | new article mentioning Priceless / Mastercard / Chase Freedom / Fan Fest / playtest / presale |
 | Chase media center (media.chase.com/news) | new article about League / Riot / Worlds / esports / Freedom |

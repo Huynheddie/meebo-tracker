@@ -112,6 +112,98 @@ def check_priceless():
     return {name: check_priceless_page(url) for name, url in PRICELESS_PAGES.items()}
 
 
+# ---------------------------------------------------------------- sitemap catch-all
+# Priceless has 16 look-alike League/Riot pages (Oct 2026: four "Riot Games", seven "League of
+# Legends Esports", ...), and filed the LCS 2026 experience under "LoL Esports" rather than "Riot
+# Games". So the sitemap, which lists every live page and product and is rebuilt daily, is used to
+# (1) watch every League/Riot page, including ones created later, and (2) inspect every product
+# that appears anywhere on the site, in case the experience is filed under something unrelated.
+SITEMAP_URL = "https://www.priceless.com/sitemap.xml"
+CELEBRITY_RE = re.compile(
+    r"https://www\.priceless\.com/celebrity/(\d+)/([a-z0-9-]*(?:riot-games|league-of-legends|lolesports|arcane)[a-z0-9-]*)$")
+PRODUCT_LOC_RE = re.compile(r"https://www\.priceless\.com/[a-z-]+/product/(\d+)/([a-z0-9-]+)")
+# Whole hyphen-separated words only: "riot" must not match "patriot", "lol" not "lola".
+PRODUCT_SLUG_RE = re.compile(
+    r"(?:^|-)(?:riot|lcs|lta|lol|arcane|summoners?)(?:-|$)|worlds-20\d\d|league-of-legends|lolesports")
+PRODUCT_TEXT_RE = re.compile(r"league of legends|riot games|lol ?esports|\bLCS\b|\bLTA\b", re.I)
+MAX_PRODUCT_FETCHES = 20  # per cycle; any left over are checked next cycle
+
+
+def sitemap_locs():
+    xml = fetch(SITEMAP_URL, timeout=60)
+    locs = re.findall(r"<loc>([^<]+)</loc>", xml)
+    if len(locs) < 1000:
+        raise RuntimeError(f"sitemap has only {len(locs)} URLs (blocked or changed?)")
+    return locs
+
+
+def product_is_relevant(url, slug):
+    """Slug first (free). Otherwise read the page: its celebrity links and its text.
+    Products for other countries come back as a blank template, so for those the slug is all
+    there is to go on."""
+    if PRODUCT_SLUG_RE.search(slug):
+        return True
+    try:
+        page = fetch(url)
+    except Exception as e:
+        print(f"[{now()}] sitemap: could not read {url}: {e}", file=sys.stderr)
+        return False
+    celebs = ["https://www.priceless.com" + c for c in re.findall(r'/celebrity/\d+/[a-z0-9-]+', page)]
+    return any(CELEBRITY_RE.match(c) for c in celebs) or bool(PRODUCT_TEXT_RE.search(to_text(page)))
+
+
+def run_sitemap(state):
+    sm = state.setdefault("sitemap", {})
+    state["fails"].setdefault("sitemap", 0)
+    try:
+        locs = sitemap_locs()
+    except Exception as e:
+        state["fails"]["sitemap"] += 1
+        print(f"[{now()}] sitemap failed ({state['fails']['sitemap']}): {e}", file=sys.stderr)
+        if state["fails"]["sitemap"] == FAIL_ALERT_AFTER:
+            notify("Tracker warning: Priceless sitemap failing", str(e), url=SITEMAP_URL, priority="high")
+        return
+    state["fails"]["sitemap"] = 0
+
+    fixed = set(PRICELESS_PAGES.values())
+    sm["celebrity_pages"] = sorted({u for u in locs if CELEBRITY_RE.match(u)} - fixed)
+
+    products = {}
+    for u in locs:
+        m = PRODUCT_LOC_RE.match(u)
+        if m:
+            products.setdefault(m.group(1), (u, m.group(2)))
+    if "seen" not in sm:  # first run: baseline everything already live
+        sm["seen"] = sorted(products)
+        print(f"[{now()}] sitemap: baseline of {len(products)} product(s), "
+              f"{len(sm['celebrity_pages'])} extra League/Riot page(s)")
+        return
+
+    seen = set(sm["seen"])
+    new = [pid for pid in products if pid not in seen]
+    hits = 0
+    for pid in new[:MAX_PRODUCT_FETCHES]:
+        url, slug = products[pid]
+        if product_is_relevant(url, slug):
+            hits += 1
+            notify("PRICELESS DROP: League/Riot listing found", f"New Priceless listing - go now:\n{url}",
+                   url=url, ring=True)
+        seen.add(pid)
+    sm["seen"] = sorted(seen & set(products))  # forget products that left the sitemap
+    print(f"[{now()}] sitemap: {len(new)} new product(s), checked {min(len(new), MAX_PRODUCT_FETCHES)}, "
+          f"{hits} League/Riot; watching {len(sm['celebrity_pages'])} extra page(s)")
+
+
+def watched_pages(state):
+    """The fixed pages plus every League/Riot page the sitemap has turned up."""
+    pages = dict(PRICELESS_PAGES)
+    for url in state.get("sitemap", {}).get("celebrity_pages", []):
+        m = CELEBRITY_RE.match(url)
+        if m:
+            pages[f"{m.group(2)} ({m.group(1)})"] = url
+    return pages
+
+
 def check_chase():
     """Return the normalized text of the event block + its hash."""
     page = fetch(CHASE_URL)
@@ -326,9 +418,12 @@ def run_once(state):
     state.setdefault("fails", {})
     state["fails"].setdefault("chase", 0)
 
+    # --- Priceless sitemap: catch-all, and discovers the League/Riot pages to watch
+    run_sitemap(state)
+
     # --- Priceless (each page tracked separately)
     state.setdefault("priceless", {})
-    for name, url in PRICELESS_PAGES.items():
+    for name, url in watched_pages(state).items():
         key = f"priceless:{name}"
         state["fails"].setdefault(key, 0)
         try:
