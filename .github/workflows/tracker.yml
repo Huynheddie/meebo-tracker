@@ -39,6 +39,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           X_RSS_FEEDS: ${{ secrets.X_RSS_FEEDS }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
         run: |

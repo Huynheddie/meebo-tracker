@@ -34,6 +34,8 @@ Only a ticket listing rings: a Pushover emergency alarm plus an urgent ntfy push
 (news, the Chase page, tracker warnings) is a normal push by day and a silent one in quiet hours.
   KEYWORDS         regex an article/post must match to alert (default: priceless/mastercard/...)
   X_RSS_FEEDS      optional comma list of RSS/Atom feed URLs (e.g. an rss.app feed of @LoLEsports)
+  X_BEARER_TOKEN   optional X API bearer token: searches X for drop announcements (pay-per-use)
+  X_QUERY          optional, overrides the X search query below
   INTERVAL         seconds between checks in loop mode (default 120)
   STATE_FILE       where to keep state (default state.json next to this script)
 """
@@ -45,6 +47,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -412,6 +415,64 @@ def check_news_source(src, src_state):
     return hits
 
 
+# ---------------------------------------------------------------- X search (pay-per-use API)
+# Billed per post returned ($0.005 as of Oct 2026), so the filtering happens in X's query, not
+# here: only matching posts are ever returned, which keeps a month to well under a dollar.
+# Keywords come from how past drops were actually announced:
+#   @lolesports  "CALLING ALL CHASE FREEDOM FLEX MASTERCARD CARDHOLDERS! ... exclusive sale ...
+#                 Limited quantities"
+#   @LCSOfficial "with your Chase Freedom Flex ... playtest ... priceless.com/LCSChampsPlaytest"
+#   @MastercardGG "Attention Mastercard Cardholders: The Mastercard Presale for @Lolesports ..."
+# @MastercardGG covers every game, so it must also mention League.
+X_SEARCH_URL = "https://api.x.com/2/tweets/search/recent"
+X_QUERY = os.environ.get("X_QUERY") or (
+    '((from:lolesports OR from:riotgames OR from:LCSOfficial) '
+    '(priceless OR mastercard OR cardholders OR cardholder OR presale OR "pre-sale" '
+    'OR "freedom flex" OR "chase freedom" OR "exclusive sale" OR "limited quantities" '
+    'OR playtest OR "fan fest" OR url:priceless)) '
+    'OR (from:MastercardGG (lolesports OR "league of legends" OR worlds OR LCS OR worlds2026))')
+X_OVERLAP = 10 * 60  # re-search the last 10 minutes each time; X can index a post a little late
+
+
+def x_iso(t):
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def check_x(xs, token):
+    """Return [(text, url)] for posts not seen before. The first call only records a start time,
+    so turning this on never reads (or pays for) posts from before it was on."""
+    started = time.time()
+    if "last_run" not in xs:
+        xs["last_run"] = int(started)
+        xs["seen"] = []
+        return []
+    # recent search only reaches back 7 days
+    since = max(xs["last_run"] - X_OVERLAP, started - 6 * 86400)
+    params = {"query": X_QUERY, "start_time": x_iso(since), "max_results": "100",
+              "tweet.fields": "created_at"}
+    posts = []
+    for _ in range(5):  # pages; more than 500 matching posts in 10 minutes would be news itself
+        req = urllib.request.Request(f"{X_SEARCH_URL}?{urllib.parse.urlencode(params)}",
+                                     headers={"Authorization": f"Bearer {token}", "User-Agent": UA})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                body = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="ignore")[:200]
+            hint = " (out of credit?)" if e.code in (402, 403) else ""
+            raise RuntimeError(f"X API {e.code}{hint}: {detail}") from None
+        posts += body.get("data", [])
+        nxt = body.get("meta", {}).get("next_token")
+        if not nxt:
+            break
+        params["next_token"] = nxt
+    xs["last_run"] = int(started)
+    seen = set(xs.get("seen", []))
+    new = [p for p in posts if p["id"] not in seen]
+    xs["seen"] = (xs.get("seen", []) + [p["id"] for p in new])[-300:]
+    return [(p.get("text", ""), f"https://x.com/i/status/{p['id']}") for p in new]
+
+
 def run_social(state):
     state.setdefault("news", {})
     state.setdefault("rss", {})
@@ -430,6 +491,21 @@ def run_social(state):
             print(f"[{now()}] {src['name']} failed ({state['fails'][key]}): {e}", file=sys.stderr)
             if state["fails"][key] == FAIL_ALERT_AFTER:
                 notify(f"Tracker warning: {src['name']} failing", str(e), url=src["url"])
+
+    token = os.environ.get("X_BEARER_TOKEN", "").strip()
+    if token:
+        state["fails"].setdefault("x", 0)
+        try:
+            hits = check_x(state.setdefault("x", {}), token)
+            state["fails"]["x"] = 0
+            for text, link in hits:
+                notify("Post on X about the drop", text[:400], url=link)
+            print(f"[{now()}] x: {len(hits)} matching new post(s)")
+        except Exception as e:
+            state["fails"]["x"] += 1
+            print(f"[{now()}] x failed ({state['fails']['x']}): {e}", file=sys.stderr)
+            if state["fails"]["x"] == FAIL_ALERT_AFTER:
+                notify("Tracker warning: X search failing", str(e)[:300])
 
     feeds = [f.strip() for f in os.environ.get("X_RSS_FEEDS", "").split(",") if f.strip()]
     for feed in feeds:
