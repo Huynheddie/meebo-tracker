@@ -22,7 +22,8 @@
     "priceless:riot-games (21439)": 0,
     "priceless:riot-games (22503)": 0,
     "priceless:t1-esports-league-of-legends (19181)": 0,
-    "sitemap": 0
+    "sitemap": 0,
+    "x": 0
   },
   "news": {
     "Chase media center": {
@@ -2971,5 +2972,9 @@
       "242247",
       "242251"
     ]
+  },
+  "x": {
+    "last_run": 1791400627,
+    "seen": []
   }
 }
