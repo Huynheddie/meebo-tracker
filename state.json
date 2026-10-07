@@ -23,7 +23,7 @@
     "priceless:riot-games (22503)": 0,
     "priceless:t1-esports-league-of-legends (19181)": 0,
     "sitemap": 0,
-    "x": 0
+    "x": 1
   },
   "news": {
     "Chase media center": {
@@ -401,7 +401,7 @@
       "https://www.priceless.com/celebrity/22037/league-of-legends",
       "https://www.priceless.com/celebrity/22503/riot-games"
     ],
-    "checked_at": 1791398797,
+    "checked_at": 1791402315,
     "seen": [
       "103753",
       "128280",
