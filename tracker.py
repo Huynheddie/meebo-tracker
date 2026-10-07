@@ -133,7 +133,10 @@ PRODUCT_LOC_RE = re.compile(r"https://www\.priceless\.com/[a-z-]+/product/(\d+)/
 PRODUCT_SLUG_RE = re.compile(
     r"(?:^|-)(?:lcs|summoners?)(?:-|$)|riot-games|worlds-20\d\d|league-of-legends|lolesports|lol-esports")
 PRODUCT_TEXT_RE = re.compile(r"league of legends|riot games|lol ?esports", re.I)
-MAX_PRODUCT_FETCHES = 20  # per cycle; any left over are checked next cycle
+MAX_PRODUCT_FETCHES = 60  # per sitemap check; any left over are checked next time
+# Priceless rebuilds the sitemap about daily and it is 4 MB, so it is read hourly rather than on
+# every run. The League/Riot pages themselves are still checked every run.
+SITEMAP_EVERY = 55 * 60  # seconds; a little under an hour so runs on the hour don't skip one
 
 
 def sitemap_locs():
@@ -162,6 +165,8 @@ def product_is_relevant(url, slug):
 def run_sitemap(state):
     sm = state.setdefault("sitemap", {})
     state["fails"].setdefault("sitemap", 0)
+    if "seen" in sm and time.time() - sm.get("checked_at", 0) < SITEMAP_EVERY:
+        return
     try:
         locs = sitemap_locs()
     except Exception as e:
@@ -171,6 +176,7 @@ def run_sitemap(state):
             notify("Tracker warning: Priceless sitemap failing", str(e), url=SITEMAP_URL)
         return
     state["fails"]["sitemap"] = 0
+    sm["checked_at"] = int(time.time())
 
     fixed = set(PRICELESS_PAGES.values())
     sm["celebrity_pages"] = sorted({u for u in locs if CELEBRITY_RE.match(u)} - fixed)
