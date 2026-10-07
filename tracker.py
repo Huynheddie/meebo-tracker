@@ -435,6 +435,20 @@ X_QUERY = os.environ.get("X_QUERY") or (
     'OR (from:MastercardGG (lolesports OR "league of legends" OR worlds OR LCS OR worlds2026))')
 X_OVERLAP = 10 * 60  # re-search the last 10 minutes each time; X can index a post a little late
 
+# A post rings the alarm only when it reads as a drop: a card/Priceless term AND a sale term, or a
+# priceless.com link. A sponsor mention alone ("the Chase Freedom Flex lounge has merch discounts")
+# stays a normal push. Checked against the real announcements quoted above.
+X_DROP_CARD = re.compile(r"priceless|chase freedom|freedom flex|cardholders?\b", re.I)
+X_DROP_SALE = re.compile(
+    r"pre-?sale|exclusive sale|on sale|tickets?\b|packages?\b|limited quantit|go(?:es)? live|"
+    r"(?:now|is|are) live|available now|book now|get yours", re.I)
+X_DROP_LINK = re.compile(r"priceless\.com", re.I)
+X_RING_COOLDOWN = 30 * 60  # one announcement is often posted by several accounts; ring once
+
+
+def x_is_drop(text):
+    return bool(X_DROP_LINK.search(text) or (X_DROP_CARD.search(text) and X_DROP_SALE.search(text)))
+
 
 def x_iso(t):
     return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -451,7 +465,7 @@ def check_x(xs, token):
     # recent search only reaches back 7 days
     since = max(xs["last_run"] - X_OVERLAP, started - 6 * 86400)
     params = {"query": X_QUERY, "start_time": x_iso(since), "max_results": "100",
-              "tweet.fields": "created_at"}
+              "tweet.fields": "created_at,entities"}
     posts = []
     for _ in range(5):  # pages; more than 500 matching posts in 10 minutes would be news itself
         req = urllib.request.Request(f"{X_SEARCH_URL}?{urllib.parse.urlencode(params)}",
@@ -472,7 +486,10 @@ def check_x(xs, token):
     seen = set(xs.get("seen", []))
     new = [p for p in posts if p["id"] not in seen]
     xs["seen"] = (xs.get("seen", []) + [p["id"] for p in new])[-300:]
-    return [(p.get("text", ""), f"https://x.com/i/status/{p['id']}") for p in new]
+    def full_text(p):  # X shortens links to t.co; add where they really go
+        urls = [u.get("expanded_url", "") for u in p.get("entities", {}).get("urls", [])]
+        return " ".join([p.get("text", "")] + urls)
+    return [(full_text(p), f"https://x.com/i/status/{p['id']}") for p in new]
 
 
 def run_social(state):
@@ -520,8 +537,13 @@ def run_x(state):
         try:
             hits = check_x(state.setdefault("x", {}), token)
             state["fails"]["x"] = 0
+            xs = state["x"]
             for text, link in hits:
-                notify("Post on X about the drop", text[:400], url=link)
+                ring = x_is_drop(text) and time.time() - xs.get("last_ring", 0) > X_RING_COOLDOWN
+                if ring:
+                    xs["last_ring"] = int(time.time())
+                notify("X: Priceless / Freedom Flex drop post" if ring else "Post on X about the drop",
+                       text[:400], url=link, ring=ring)
             print(f"[{now()}] x: {len(hits)} matching new post(s)")
         except Exception as e:
             state["fails"]["x"] += 1
