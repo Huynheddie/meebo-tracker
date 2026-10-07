@@ -6,5 +6,5 @@ Type=oneshot
 EnvironmentFile=/etc/meebo.env
 ExecStart=/bin/sh -c 'curl -fsS -m 20 -o /dev/null -H "Title: Check Vultr billing" -H "Priority: default" \
   -H "Click: https://my.vultr.com/billing/" \
-  -d "Pending charges should be about $$1-5. Anything more means something else is running on your account." \
+  -d "Pending charges should be about 1-5 dollars. Anything more means something else is running on your account." \
   "https://ntfy.sh/$NTFY_TOPIC"'
