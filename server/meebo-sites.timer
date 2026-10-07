@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Priceless, Chase and the news every 10 minutes
+
+[Timer]
+# half a minute after the X search, so the two rarely wait for each other
+OnCalendar=*-*-* *:00/10:30
+AccuracySec=1s
+Unit=meebo@sites.service
+
+[Install]
+WantedBy=timers.target

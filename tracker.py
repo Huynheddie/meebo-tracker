@@ -16,6 +16,8 @@ Stdlib only. Notifications via ntfy.sh (phone push) and/or a Discord webhook.
 Usage:
   python tracker.py                 # loop forever, check every INTERVAL seconds
   python tracker.py --once          # single check (for cron / GitHub Actions)
+  python tracker.py --once --only x       # just the X search (the server runs this every minute)
+  python tracker.py --once --only sites   # everything but X (the server runs this every 10 minutes)
   python tracker.py --test-notify   # send a test push and exit
   python tracker.py --test-alarm    # send a test Pushover emergency alarm and exit
   python tracker.py --status        # print what the pages look like right now
@@ -492,21 +494,6 @@ def run_social(state):
             if state["fails"][key] == FAIL_ALERT_AFTER:
                 notify(f"Tracker warning: {src['name']} failing", str(e), url=src["url"])
 
-    token = os.environ.get("X_BEARER_TOKEN", "").strip()
-    if token:
-        state["fails"].setdefault("x", 0)
-        try:
-            hits = check_x(state.setdefault("x", {}), token)
-            state["fails"]["x"] = 0
-            for text, link in hits:
-                notify("Post on X about the drop", text[:400], url=link)
-            print(f"[{now()}] x: {len(hits)} matching new post(s)")
-        except Exception as e:
-            state["fails"]["x"] += 1
-            print(f"[{now()}] x failed ({state['fails']['x']}): {e}", file=sys.stderr)
-            if state["fails"]["x"] == FAIL_ALERT_AFTER:
-                notify("Tracker warning: X search failing", str(e)[:300])
-
     feeds = [f.strip() for f in os.environ.get("X_RSS_FEEDS", "").split(",") if f.strip()]
     for feed in feeds:
         key = f"rss:{feed}"
@@ -525,7 +512,31 @@ def run_social(state):
 
 
 # ---------------------------------------------------------------- main loop
-def run_once(state):
+def run_x(state):
+    state.setdefault("fails", {})
+    token = os.environ.get("X_BEARER_TOKEN", "").strip()
+    if token:
+        state["fails"].setdefault("x", 0)
+        try:
+            hits = check_x(state.setdefault("x", {}), token)
+            state["fails"]["x"] = 0
+            for text, link in hits:
+                notify("Post on X about the drop", text[:400], url=link)
+            print(f"[{now()}] x: {len(hits)} matching new post(s)")
+        except Exception as e:
+            state["fails"]["x"] += 1
+            print(f"[{now()}] x failed ({state['fails']['x']}): {e}", file=sys.stderr)
+            if state["fails"]["x"] == FAIL_ALERT_AFTER:
+                notify("Tracker warning: X search failing", str(e)[:300])
+
+
+def run_once(state, only=None):
+    """only="x" runs just the X search; only="sites" runs everything else; None runs both."""
+    if only != "sites":
+        run_x(state)
+    if only == "x":
+        return state
+
     state.setdefault("fails", {})
     state["fails"].setdefault("chase", 0)
 
@@ -599,6 +610,7 @@ def run_once(state):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true")
+    ap.add_argument("--only", choices=["x", "sites"])
     ap.add_argument("--test-notify", action="store_true")
     ap.add_argument("--test-alarm", action="store_true")
     ap.add_argument("--status", action="store_true")
@@ -621,7 +633,7 @@ def main():
 
     state = load_state()
     if args.once:
-        save_state(run_once(state))
+        save_state(run_once(state, args.only))
         return
 
     interval = int(os.environ.get("INTERVAL", "120"))

@@ -1,0 +1,12 @@
+[Unit]
+Description=meebo tracker check (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=meebo
+EnvironmentFile=/etc/meebo.env
+Environment=STATE_FILE=/var/lib/meebo/state.json
+ExecStart=/opt/meebo-tracker/server/run.sh %i
+TimeoutStartSec=300
