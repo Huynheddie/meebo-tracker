@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily reminder to destroy the server, from November 7
+
+[Timer]
+# 17:00 UTC is 9am Pacific in November
+OnCalendar=*-*-* 17:00:00 UTC
+
+[Install]
+WantedBy=timers.target

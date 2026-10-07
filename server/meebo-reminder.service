@@ -1,0 +1,12 @@
+[Unit]
+Description=Remind me to destroy this server once the tracker's job is done
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/meebo.env
+# From November 7 on, every day until the server is gone. FORCE=1 sends it now, for testing.
+ExecStart=/bin/sh -c '[ "$FORCE" = 1 ] || [ "$(date -u +%%Y%%m%%d)" -ge 20261107 ] || exit 0; \
+  curl -fsS -m 20 -o /dev/null -H "Title: Destroy the meebo server on Vultr" -H "Priority: default" \
+  -H "Click: https://my.vultr.com/" \
+  -d "Worlds is over. Destroy the server (Server > Settings > Destroy) so it stops costing money, then check Billing shows nothing owed." \
+  "https://ntfy.sh/$NTFY_TOPIC"'
