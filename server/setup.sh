@@ -20,6 +20,7 @@ fi
 
 install -m 644 /opt/meebo-tracker/server/meebo@.service /opt/meebo-tracker/server/meebo-x.timer \
   /opt/meebo-tracker/server/meebo-sites.timer /opt/meebo-tracker/server/meebo-reminder.service \
-  /opt/meebo-tracker/server/meebo-reminder.timer /etc/systemd/system/
+  /opt/meebo-tracker/server/meebo-reminder.timer /opt/meebo-tracker/server/meebo-billing.service \
+  /opt/meebo-tracker/server/meebo-billing.timer /etc/systemd/system/
 systemctl daemon-reload
-echo "Installed. Fill in /etc/meebo.env, then: systemctl enable --now meebo-x.timer meebo-sites.timer meebo-reminder.timer"
+echo "Installed. Fill in /etc/meebo.env, then: systemctl enable --now meebo-x.timer meebo-sites.timer meebo-reminder.timer meebo-billing.timer"

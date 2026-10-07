@@ -1,0 +1,9 @@
+[Unit]
+Description=Every other day, a reminder to look at Vultr billing
+
+[Timer]
+# odd days of the month, 17:00 UTC (10am Pacific in October, 9am from November 1)
+OnCalendar=*-*-01/2 17:00:00 UTC
+
+[Install]
+WantedBy=timers.target
