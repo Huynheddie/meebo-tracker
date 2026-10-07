@@ -152,19 +152,28 @@ def sitemap_locs():
     return locs
 
 
-def product_is_relevant(url, slug):
-    """Slug first (free). Otherwise read the page: its celebrity links and its text.
-    Products for other countries come back as a blank template, so for those the slug is all
-    there is to go on."""
-    if PRODUCT_SLUG_RE.search(slug):
-        return True
-    try:
-        page = fetch(url)
-    except Exception as e:
-        print(f"[{now()}] sitemap: could not read {url}: {e}", file=sys.stderr)
-        return False
-    celebs = ["https://www.priceless.com" + c for c in re.findall(r'/celebrity/\d+/[a-z0-9-]+', page)]
-    return any(CELEBRITY_RE.match(c) for c in celebs) or bool(PRODUCT_TEXT_RE.search(to_text(page)))
+# A League listing found through the sitemap rings only if it is about Worlds; any other League
+# listing (an office tour, a regional event) is a normal push.
+WORLDS_RE = re.compile(r"\bworlds\b|world championship|world finals|grand finals?", re.I)
+
+
+def product_relevance(url, slug):
+    """Return (is_league, is_worlds). Slug first (free), then the page: its celebrity links and
+    its text. Products for other countries come back as a blank template, so for those the slug
+    is all there is to go on."""
+    words = slug.replace("-", " ")
+    text = ""
+    if not PRODUCT_SLUG_RE.search(slug):
+        try:
+            page = fetch(url)
+        except Exception as e:
+            print(f"[{now()}] sitemap: could not read {url}: {e}", file=sys.stderr)
+            return False, False
+        text = to_text(page)
+        celebs = ["https://www.priceless.com" + c for c in re.findall(r'/celebrity/\d+/[a-z0-9-]+', page)]
+        if not (any(CELEBRITY_RE.match(c) for c in celebs) or PRODUCT_TEXT_RE.search(text)):
+            return False, False
+    return True, bool(WORLDS_RE.search(words + " " + text))
 
 
 def run_sitemap(state):
@@ -213,14 +222,21 @@ def run_sitemap(state):
     hits = 0
     for pid in new[:MAX_PRODUCT_FETCHES]:
         url, slug = products[pid]
-        if product_is_relevant(url, slug):
+        is_league, is_worlds = product_relevance(url, slug)
+        if is_league:
             hits += 1
-            notify("PRICELESS DROP: League/Riot listing found", f"New Priceless listing - go now:\n{url}",
-                   url=url, ring=True)
+            notify("PRICELESS DROP: Worlds listing found" if is_worlds else "Priceless: new League listing",
+                   f"New Priceless listing:\n{url}", url=url, ring=is_worlds)
         seen.add(pid)
     sm["seen"] = sorted(seen & set(products))  # forget products that left the sitemap
     print(f"[{now()}] sitemap: {len(new)} new product(s), checked {min(len(new), MAX_PRODUCT_FETCHES)}, "
           f"{hits} League/Riot; watching {len(sm['celebrity_pages'])} extra page(s)")
+
+
+def rings_for(url):
+    """Core Riot/League pages ring. Arcane (the TV show) and T1 (one team) may list experiences
+    unrelated to Worlds, so a listing there is a normal push."""
+    return not re.search(r"/celebrity/\d+/(?:arcane|t1-)", url)
 
 
 def watched_pages(state):
@@ -435,10 +451,11 @@ X_QUERY = os.environ.get("X_QUERY") or (
     'OR (from:MastercardGG (lolesports OR "league of legends" OR worlds OR LCS OR worlds2026))')
 X_OVERLAP = 10 * 60  # re-search the last 10 minutes each time; X can index a post a little late
 
-# A post rings the alarm only when it reads as a drop: a card/Priceless term AND a sale term, or a
-# priceless.com link. A sponsor mention alone ("the Chase Freedom Flex lounge has merch discounts")
-# stays a normal push. Checked against the real announcements quoted above.
-X_DROP_CARD = re.compile(r"priceless|chase freedom|freedom flex|cardholders?\b", re.I)
+# A post rings the alarm only when it is about a Priceless drop: it links to priceless.com, or it
+# says "Priceless" together with a sale term. A Chase or Mastercard sale that is not on Priceless
+# (a cardholder ticket presale, say) and a sponsor mention ("the Freedom Flex lounge has merch
+# discounts") are normal pushes. Checked against the real announcements quoted above.
+X_DROP_CARD = re.compile(r"\bpriceless\b", re.I)
 X_DROP_SALE = re.compile(
     r"pre-?sale|exclusive sale|on sale|tickets?\b|packages?\b|limited quantit|go(?:es)? live|"
     r"(?:now|is|are) live|available now|book now|get yours", re.I)
@@ -579,14 +596,14 @@ def run_once(state, only=None):
                 # first run: baseline (but still alert if something is already listed)
                 if products:
                     notify(f"PRICELESS: {len(products)} listing(s) already on {name}",
-                           "\n".join(products.values())[:500], url=url, ring=True)
+                           "\n".join(products.values())[:500], url=url, ring=rings_for(url))
             else:
                 new = {k: v for k, v in products.items() if k not in seen}
                 if new:
                     first = next(iter(new.values()))
                     notify(f"PRICELESS DROP: new {name} experience",
                            f"{len(new)} new listing(s) - go now:\n" + "\n".join(new.values())[:500],
-                           url=first, ring=True)
+                           url=first, ring=rings_for(url))
             state["priceless"][name] = sorted(products)
             print(f"[{now()}] priceless/{name}: {len(products)} product(s)")
         except Exception as e:
